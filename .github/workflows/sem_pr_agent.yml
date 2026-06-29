@@ -58,7 +58,8 @@ jobs:
           
           while read -r change; do  
             entity_name=$(echo "$change" | jq -r '.entityName')  
-            file_path=$(echo "$change" | jq -r '.filePath')  
+            file_path=$(echo "$change" | jq -r '.filePath')
+            entity_type=$(echo "$change" | jq -r '.entityType') 
               
             if sem context "$entity_name" --file "$file_path" --json > context.json; then  
               direct_deps=$(jq '[.entries[] | select(.role == "direct_dependent")]' context.json)
@@ -80,7 +81,7 @@ jobs:
                       else  
                         echo "," >> data.json  
                       fi  
-                      jq -n --arg name "$entity_name" --arg path "$file_path" --argjson direct "$direct_deps" --argjson transitive "$transitive_deps" '{entityName: $name, filePath: $path, direct_dependents: $direct, transitive_dependents: $transitive}' >> data.json
+                      jq -n --arg name "$entity_name" --arg path "$file_path" --arg type "$entity_type" --argjson direct "$direct_deps" --argjson transitive "$transitive_deps" '{entityName: $name, entityType: $type, filePath: $path, direct_dependents: $direct, transitive_dependents: $transitive}' >> data.json
                     fi
                   fi
                 done < <(echo "$direct_deps" | jq -c '.[]')
@@ -120,7 +121,7 @@ jobs:
             let comment = "# Dependents with Code Content (sem)\n\n";  
             
             data.forEach(entity => {
-              comment += `## ${entity.entityName} (${entity.filePath})\n\n`;
+              comment += `## Changed entity: ${entity.entityType} ${entity.entityName} (${entity.filePath})\n\n`;
               entity.direct_dependents.forEach(dep => {
                 comment += `### ${dep.name} (${dep.type})\n`;
                 comment += `File: ${dep.file}\n`;
