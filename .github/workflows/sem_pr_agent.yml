@@ -66,6 +66,7 @@ jobs:
 
               # Kiểm tra nếu direct_deps không rỗng trước khi loop  
               if [ -n "$direct_deps" ] && [ "$direct_deps" != "[]" ]; then 
+                all_transitive_deps="[]"
                 # Xử lý từng direct_dependent 
                 while read -r direct_dep; do  
                   dep_name=$(echo "$direct_dep" | jq -r '.name')  
@@ -76,15 +77,17 @@ jobs:
                     transitive_deps=$(jq '[.entries[] | select(.role == "direct_dependent") | . + {"parent": "'"$dep_name"'"}]' transitive_context.json)
 
                     if [ -n "$transitive_deps" ] && [ "$transitive_deps" != "[]" ]; then  
-                      if [ "$first" = true ]; then  
-                        first=false  
-                      else  
-                        echo "," >> data.json  
-                      fi  
-                      jq -n --arg name "$entity_name" --arg path "$file_path" --arg type "$entity_type" --argjson direct "$direct_deps" --argjson transitive "$transitive_deps" '{entityName: $name, entityType: $type, filePath: $path, direct_dependents: $direct, transitive_dependents: $transitive}' >> data.json
+                      all_transitive_deps=$(jq --argjson current "$all_transitive_deps" --argjson new "$transitive_deps" -n '$current + $new')
                     fi
                   fi
                 done < <(echo "$direct_deps" | jq -c '.[]')
+                
+                if [ "$first" = true ]; then  
+                  first=false  
+                else  
+                  echo "," >> data.json  
+                fi  
+                jq -n --arg name "$entity_name" --arg path "$file_path" --arg type "$entity_type" --argjson direct "$direct_deps" --argjson transitive "$all_transitive_deps" '{entityName: $name, entityType: $type, filePath: $path, direct_dependents: $direct, transitive_dependents: $transitive}' >> data.json
               fi
 
             else  
@@ -121,7 +124,7 @@ jobs:
             let comment = "# Dependents with Code Content (sem)\n\n";  
             
             data.forEach(entity => {
-              comment += `## Changed entity: ${entity.entityType} ${entity.entityName} (${entity.filePath})\n\n`;
+              comment += `## Changed entity: ${entity.entityType} \`${entity.entityName}\` (${entity.filePath})\n\n`;
               entity.direct_dependents.forEach(dep => {
                 comment += `### ${dep.name} (${dep.type})\n`;
                 comment += `File: ${dep.file}\n`;
