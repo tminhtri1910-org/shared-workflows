@@ -51,7 +51,7 @@ jobs:
       - name: Extract dependents data
         id: dependents
         env:
-          OUTPUT_FILE: dependents-data-${{ github.event.repository.name }}
+          OUTPUT_FILE: dependents-data-${{ github.event.repository.name }}.json
         run: |
           echo "[" > "$OUTPUT_FILE"
           first=true
@@ -98,7 +98,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dependents-data-${{ github.event.repository.name }}
-          path: dependents-data-${{ github.event.repository.name }}
+          path: dependents-data-${{ github.event.repository.name }}.json
           retention-days: 14
           
       - name: PR Agent action step
@@ -108,13 +108,13 @@ jobs:
           OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Map the file path to an environment variable for pr-agent to read
-          DEPENDENTS_DATA_FILE: dependents-data-${{ github.event.repository.name }}
+          DEPENDENTS_DATA_FILE: dependents-data-${{ github.event.repository.name }}.json
               
       # Step 5: Post the generated impact report as a comment on the pull request
       - name: Comment PR with impact report
         uses: actions/github-script@v7
         env:
-          DEPENDENTS_DATA_FILE: dependents-data-${{ github.event.repository.name }}
+          DEPENDENTS_DATA_FILE: dependents-data-${{ github.event.repository.name }}.json
         with:
           script: |
             const fs = require('fs');
