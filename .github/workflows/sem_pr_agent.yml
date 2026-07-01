@@ -50,8 +50,10 @@ jobs:
       # Step 4: Extract dependents data (JSON)
       - name: Extract dependents data
         id: dependents
+        env:
+          OUTPUT_FILE: dependents-data-${{ github.event.repository.name }}
         run: |
-          echo "[" > data.json
+          echo "[" > "$OUTPUT_FILE"
           first=true
           
           jq -r '.changes[] | [.entityName, .filePath, .entityType] | @tsv' diff.json | while IFS=$'\t' read -r entity_name file_path entity_type; do  
@@ -75,12 +77,12 @@ jobs:
                 if [ "$first" = true ]; then  
                   first=false  
                 else  
-                  echo "," >> data.json  
+                  echo "," >> "$OUTPUT_FILE"  
                 fi  
                 jq -n --arg name "$entity_name" --arg path "$file_path" --arg type "$entity_type" \
                   --slurpfile direct direct.json \
                   --slurpfile transitive all_transitive.json \
-                  '{entityName: $name, entityType: $type, filePath: $path, direct_dependents: $direct[0], transitive_dependents: $transitive[0]}' >> data.json
+                  '{entityName: $name, entityType: $type, filePath: $path, direct_dependents: $direct[0], transitive_dependents: $transitive[0]}' >> "$OUTPUT_FILE"
               fi
 
             else  
@@ -90,24 +92,33 @@ jobs:
 
           done
           
-          echo "]" >> data.json
+          echo "]" >> "$OUTPUT_FILE"
 
       - name: Upload Dependents Data Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dependents-data
-          path: data.json
+          name: dependents-data-${{ github.event.repository.name }}
+          path: dependents-data-${{ github.event.repository.name }}
           retention-days: 14
-                    
+          
+      - name: PR Agent action step
+        id: pragent
+        uses: tminhtri1910/pr-agent@main
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Map the file path to an environment variable for pr-agent to read
+          DEPENDENTS_DATA_FILE: dependents-data-${{ github.event.repository.name }}
+              
       # Step 5: Post the generated impact report as a comment on the pull request
       - name: Comment PR with impact report
         uses: actions/github-script@v7
         env:
-          DEPENDENTS_DATA_FILE: data.json
+          DEPENDENTS_DATA_FILE: dependents-data-${{ github.event.repository.name }}
         with:
           script: |
             const fs = require('fs');
-            const data = JSON.parse(fs.readFileSync('data.json', 'utf8'));  
+            const data = JSON.parse(fs.readFileSync(process.env.DEPENDENTS_DATA_FILE, 'utf8'));  
             let comment = "# Dependents with Code Content (sem)\n\n";  
             
             data.forEach(entity => {
@@ -131,6 +142,13 @@ jobs:
                 comment += '```\n\n';
               });
             });
+
+            // Truncate comment if it exceeds GitHub's 65536 character limit
+            const MAX_LENGTH = 65000;
+            if (comment.length > MAX_LENGTH) {
+              const remaining = comment.length - MAX_LENGTH;
+              comment = comment.substring(0, MAX_LENGTH) + `\n\n> [!WARNING]\n> **The impact report was truncated because it exceeded GitHub's 65,536 character limit.**\n> There are ${remaining} more characters not displayed. Please download the \`dependents-data\` artifact from the Actions tab to view the full JSON data.`;
+            }
 
             // Use the GitHub REST API to create a comment on the current PR
             github.rest.issues.createComment({  
