@@ -54,38 +54,33 @@ jobs:
           echo "[" > data.json
           first=true
           
-          while read -r change; do  
-            entity_name=$(echo "$change" | jq -r '.entityName')  
-            file_path=$(echo "$change" | jq -r '.filePath')
-            entity_type=$(echo "$change" | jq -r '.entityType') 
+          jq -r '.changes[] | [.entityName, .filePath, .entityType] | @tsv' diff.json | while IFS=$'\t' read -r entity_name file_path entity_type; do  
               
             if sem context "$entity_name" --file "$file_path" --json > context.json; then  
-              direct_deps=$(jq '[.entries[] | select(.role == "direct_dependent")]' context.json)
+              jq '[.entries[] | select(.role == "direct_dependent")]' context.json > direct.json
 
-              # Kiểm tra nếu direct_deps không rỗng trước khi loop  
-              if [ -n "$direct_deps" ] && [ "$direct_deps" != "[]" ]; then 
-                all_transitive_deps="[]"
-                # Xử lý từng direct_dependent 
-                while read -r direct_dep; do  
-                  dep_name=$(echo "$direct_dep" | jq -r '.name')  
-                  dep_file=$(echo "$direct_dep" | jq -r '.file') 
-
+              if jq -e '. | length > 0' direct.json > /dev/null; then 
+                echo "[]" > all_transitive.json
+                
+                jq -r '.[] | [.name, .file] | @tsv' direct.json | while IFS=$'\t' read -r dep_name dep_file; do  
                   if sem context "$dep_name" --file "$dep_file" --json > transitive_context.json; then  
-                    # Lọc transitive_dependents và thêm trường parent  
-                    transitive_deps=$(jq '[.entries[] | select(.role == "direct_dependent") | . + {"parent": "'"$dep_name"'"}]' transitive_context.json)
+                    jq --arg parent "$dep_name" '[.entries[] | select(.role == "direct_dependent") | . + {"parent": $parent}]' transitive_context.json > current_transitive.json
 
-                    if [ -n "$transitive_deps" ] && [ "$transitive_deps" != "[]" ]; then  
-                      all_transitive_deps=$(jq --argjson current "$all_transitive_deps" --argjson new "$transitive_deps" -n '$current + $new')
+                    if jq -e '. | length > 0' current_transitive.json > /dev/null; then  
+                      jq -s '.[0] + .[1]' all_transitive.json current_transitive.json > temp.json && mv temp.json all_transitive.json
                     fi
                   fi
-                done < <(echo "$direct_deps" | jq -c '.[]')
+                done
                 
                 if [ "$first" = true ]; then  
                   first=false  
                 else  
                   echo "," >> data.json  
                 fi  
-                jq -n --arg name "$entity_name" --arg path "$file_path" --arg type "$entity_type" --argjson direct "$direct_deps" --argjson transitive "$all_transitive_deps" '{entityName: $name, entityType: $type, filePath: $path, direct_dependents: $direct, transitive_dependents: $transitive}' >> data.json
+                jq -n --arg name "$entity_name" --arg path "$file_path" --arg type "$entity_type" \
+                  --slurpfile direct direct.json \
+                  --slurpfile transitive all_transitive.json \
+                  '{entityName: $name, entityType: $type, filePath: $path, direct_dependents: $direct[0], transitive_dependents: $transitive[0]}' >> data.json
               fi
 
             else  
@@ -93,7 +88,7 @@ jobs:
               cat context.json >&2  
             fi
 
-          done < <(jq -c '.changes[]' diff.json)
+          done
           
           echo "]" >> data.json
 
